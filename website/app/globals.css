@@ -1,0 +1,52 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-feature-settings: "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: #ffffff;
+  color: #0d253d;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-weight: 300;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.tnum {
+  font-feature-settings: "tnum";
+  letter-spacing: -0.42px;
+}
+
+input, textarea, select, button {
+  font-family: inherit;
+}
+
+::selection {
+  background: #b9b9f9;
+  color: #1c1e54;
+}
+
+.mesh-backdrop {
+  background:
+    radial-gradient(ellipse 70% 60% at 15% 0%, #f5e9d4 0%, transparent 55%),
+    radial-gradient(ellipse 50% 50% at 85% 5%, #b9b9f9 0%, transparent 55%),
+    radial-gradient(ellipse 40% 40% at 50% 0%, rgba(249,107,238,0.18) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 50% at 95% 15%, rgba(83,58,253,0.20) 0%, transparent 55%),
+    radial-gradient(ellipse 30% 30% at 30% 5%, rgba(234,34,97,0.12) 0%, transparent 45%),
+    #ffffff;
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #e3e8ee; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #a8c3de; }
