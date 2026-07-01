@@ -6,12 +6,14 @@ export default function LandingPage() {
       {/* Nav */}
       <nav className="max-w-5xl mx-auto px-6 py-5 flex items-center justify-between">
         <span className="text-ink font-light text-xl tracking-tight">TinyCRM</span>
-        <Link
-          href="/login"
-          className="text-ink-mute hover:text-ink text-sm transition-colors"
-        >
-          Sign in
-        </Link>
+        <div className="flex items-center gap-6">
+          <Link href="/docs" className="text-ink-mute hover:text-ink text-sm transition-colors">
+            Docs
+          </Link>
+          <Link href="/login" className="text-ink-mute hover:text-ink text-sm transition-colors">
+            Sign in
+          </Link>
+        </div>
       </nav>
 
       {/* Hero */}
@@ -35,16 +37,16 @@ export default function LandingPage() {
             </p>
             <div className="flex items-center gap-3">
               <Link
-                href="/login"
+                href="/register"
                 className="bg-primary text-white font-normal text-sm px-5 py-2.5 rounded-pill hover:bg-primary-deep transition-colors"
               >
                 Get started
               </Link>
               <Link
-                href="#features"
+                href="/docs"
                 className="text-sm text-ink-mute hover:text-ink transition-colors"
               >
-                See features
+                Documentation
               </Link>
             </div>
           </div>
