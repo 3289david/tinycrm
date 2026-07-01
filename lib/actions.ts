@@ -2,72 +2,105 @@
 
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-
-const FREE_LIMIT = 100
+import { getServerSession } from 'next-auth/next'
+import { authOptions } from './auth'
+import { prisma } from './prisma'
+import bcrypt from 'bcryptjs'
 
 async function getUser() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
-  return { supabase, user }
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) redirect('/login')
+  return { userId: session.user.id, isAdmin: session.user.isAdmin }
 }
 
+async function requireAdmin() {
+  const { isAdmin } = await getUser()
+  if (!isAdmin) redirect('/app/clients')
+}
+
+// ---------- Auth ----------
+
+export async function register_action(formData: FormData) {
+  const email = ((formData.get('email') as string) ?? '').toLowerCase().trim()
+  const password = (formData.get('password') as string) ?? ''
+  const name = ((formData.get('name') as string) ?? '').trim()
+
+  if (!email || !password || !name) return { error: 'All fields are required.' }
+  if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
+
+  const existing = await prisma.user.findUnique({ where: { email } })
+  if (existing) return { error: 'An account with this email already exists.' }
+
+  const isFirst = (await prisma.user.count()) === 0
+  const hash = await bcrypt.hash(password, 12)
+
+  await prisma.user.create({
+    data: { email, password: hash, name, isAdmin: isFirst },
+  })
+
+  redirect('/login?registered=1')
+}
+
+export async function updateProfile_action(formData: FormData) {
+  const { userId } = await getUser()
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: {
+      name: ((formData.get('name') as string) ?? '').trim() || null,
+      company: ((formData.get('company') as string) ?? '').trim() || null,
+    },
+  })
+
+  revalidatePath('/app/settings')
+}
+
+export async function changePassword_action(formData: FormData) {
+  const { userId } = await getUser()
+
+  const current = (formData.get('current') as string) ?? ''
+  const next = (formData.get('password') as string) ?? ''
+  const confirm = (formData.get('confirm') as string) ?? ''
+
+  if (!current || !next || !confirm) return { error: 'All fields are required.' }
+  if (next.length < 8) return { error: 'New password must be at least 8 characters.' }
+  if (next !== confirm) return { error: 'Passwords do not match.' }
+
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  if (!user) return { error: 'User not found.' }
+
+  const valid = await bcrypt.compare(current, user.password)
+  if (!valid) return { error: 'Current password is incorrect.' }
+
+  const hash = await bcrypt.hash(next, 12)
+  await prisma.user.update({ where: { id: userId }, data: { password: hash } })
+
+  return { error: null }
+}
+
+// ---------- Clients ----------
+
 export async function createClient_action(formData: FormData) {
-  const { supabase, user } = await getUser()
+  const { userId } = await getUser()
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('plan')
-    .eq('id', user.id)
-    .single()
+  const name = ((formData.get('name') as string) ?? '').trim()
+  if (!name) return { error: 'Name is required.' }
 
-  if (profile?.plan === 'free') {
-    const { count } = await supabase
-      .from('clients')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .neq('status', 'archived')
+  const tags = ((formData.get('tags') as string) ?? '')
+    .split(',').map(t => t.trim()).filter(Boolean)
 
-    if ((count ?? 0) >= FREE_LIMIT) {
-      return { error: 'Free plan limit reached. Upgrade to Pro for unlimited clients.' }
-    }
-  }
-
-  const name = formData.get('name') as string
-  if (!name?.trim()) return { error: 'Name is required.' }
-
-  const tags = (formData.get('tags') as string)
-    .split(',')
-    .map(t => t.trim())
-    .filter(Boolean)
-
-  const { data: client, error } = await supabase
-    .from('clients')
-    .insert({
-      user_id: user.id,
-      name: name.trim(),
+  const client = await prisma.client.create({
+    data: {
+      userId,
+      name,
       email: (formData.get('email') as string) || null,
       phone: (formData.get('phone') as string) || null,
       company: (formData.get('company') as string) || null,
       notes: (formData.get('notes') as string) || null,
       status: 'lead',
-    })
-    .select()
-    .single()
-
-  if (error) return { error: error.message }
-
-  if (tags.length > 0) {
-    await supabase.from('client_tags').insert(
-      tags.map(tag => ({ client_id: client.id, tag }))
-    )
-  }
-
-  await supabase.from('timeline_events').insert({
-    client_id: client.id,
-    user_id: user.id,
-    content: 'Created',
+      tags: tags.length > 0 ? { create: tags.map(tag => ({ tag })) } : undefined,
+      timeline: { create: { userId, content: 'Created' } },
+    },
   })
 
   revalidatePath('/app/clients')
@@ -75,32 +108,28 @@ export async function createClient_action(formData: FormData) {
 }
 
 export async function updateClient_action(clientId: string, formData: FormData) {
-  const { supabase, user } = await getUser()
+  const { userId } = await getUser()
 
-  const { error } = await supabase
-    .from('clients')
-    .update({
-      name: (formData.get('name') as string).trim(),
+  await prisma.client.updateMany({
+    where: { id: clientId, userId },
+    data: {
+      name: ((formData.get('name') as string) ?? '').trim(),
       email: (formData.get('email') as string) || null,
       phone: (formData.get('phone') as string) || null,
       company: (formData.get('company') as string) || null,
       notes: (formData.get('notes') as string) || null,
+    },
+  })
+
+  const tags = ((formData.get('tags') as string) ?? '')
+    .split(',').map(t => t.trim()).filter(Boolean)
+
+  await prisma.clientTag.deleteMany({ where: { clientId } })
+  if (tags.length > 0) {
+    await prisma.clientTag.createMany({
+      data: tags.map(tag => ({ clientId, tag })),
+      skipDuplicates: true,
     })
-    .eq('id', clientId)
-    .eq('user_id', user.id)
-
-  if (error) return { error: error.message }
-
-  const newTags = (formData.get('tags') as string)
-    .split(',')
-    .map(t => t.trim())
-    .filter(Boolean)
-
-  await supabase.from('client_tags').delete().eq('client_id', clientId)
-  if (newTags.length > 0) {
-    await supabase.from('client_tags').insert(
-      newTags.map(tag => ({ client_id: clientId, tag }))
-    )
   }
 
   revalidatePath(`/app/clients/${clientId}`)
@@ -108,18 +137,15 @@ export async function updateClient_action(clientId: string, formData: FormData) 
 }
 
 export async function updateStatus_action(clientId: string, status: string) {
-  const { supabase, user } = await getUser()
+  const { userId } = await getUser()
 
-  await supabase
-    .from('clients')
-    .update({ status, last_contact_at: new Date().toISOString() })
-    .eq('id', clientId)
-    .eq('user_id', user.id)
+  await prisma.client.updateMany({
+    where: { id: clientId, userId },
+    data: { status, lastContactAt: new Date() },
+  })
 
-  await supabase.from('timeline_events').insert({
-    client_id: clientId,
-    user_id: user.id,
-    content: `Status changed to ${status}`,
+  await prisma.timelineEvent.create({
+    data: { clientId, userId, content: `Status changed to ${status}` },
   })
 
   revalidatePath(`/app/clients/${clientId}`)
@@ -127,63 +153,105 @@ export async function updateStatus_action(clientId: string, status: string) {
 }
 
 export async function addTimelineEvent_action(clientId: string, formData: FormData) {
-  const { supabase, user } = await getUser()
+  const { userId } = await getUser()
 
-  const content = (formData.get('content') as string).trim()
+  const content = ((formData.get('content') as string) ?? '').trim()
   if (!content) return
 
-  await supabase.from('timeline_events').insert({
-    client_id: clientId,
-    user_id: user.id,
-    content,
+  await prisma.timelineEvent.create({ data: { clientId, userId, content } })
+  await prisma.client.updateMany({
+    where: { id: clientId, userId },
+    data: { lastContactAt: new Date() },
   })
-
-  await supabase
-    .from('clients')
-    .update({ last_contact_at: new Date().toISOString() })
-    .eq('id', clientId)
-    .eq('user_id', user.id)
 
   revalidatePath(`/app/clients/${clientId}`)
 }
 
 export async function deleteClient_action(clientId: string) {
-  const { supabase, user } = await getUser()
+  const { userId } = await getUser()
 
-  await supabase
-    .from('clients')
-    .delete()
-    .eq('id', clientId)
-    .eq('user_id', user.id)
-
+  await prisma.client.deleteMany({ where: { id: clientId, userId } })
   revalidatePath('/app/clients')
   redirect('/app/clients')
 }
 
+// ---------- Invoices ----------
+
+export async function createInvoice_action(clientId: string, formData: FormData) {
+  const { userId } = await getUser()
+
+  const description = ((formData.get('description') as string) ?? '').trim()
+  const amountStr = ((formData.get('amount') as string) ?? '').trim()
+  const currency = ((formData.get('currency') as string) || 'usd').toLowerCase()
+  const dueDateStr = formData.get('due_date') as string
+
+  if (!description) return { error: 'Description is required.' }
+  const amount = parseFloat(amountStr)
+  if (isNaN(amount) || amount <= 0) return { error: 'Amount must be greater than 0.' }
+
+  await prisma.invoice.create({
+    data: {
+      userId,
+      clientId,
+      amountCents: Math.round(amount * 100),
+      currency,
+      description,
+      dueDate: dueDateStr ? new Date(dueDateStr) : null,
+      status: 'pending',
+    },
+  })
+
+  revalidatePath(`/app/clients/${clientId}`)
+  revalidatePath('/app/invoices')
+  return { error: null }
+}
+
+export async function cancelInvoice_action(invoiceId: string, clientId: string) {
+  const { userId } = await getUser()
+
+  await prisma.invoice.updateMany({
+    where: { id: invoiceId, userId, status: 'pending' },
+    data: { status: 'cancelled' },
+  })
+
+  revalidatePath(`/app/clients/${clientId}`)
+  revalidatePath('/app/invoices')
+}
+
+// ---------- Admin ----------
+
+export async function adminDeleteUser_action(targetUserId: string) {
+  await requireAdmin()
+
+  await prisma.user.delete({ where: { id: targetUserId } })
+  revalidatePath('/admin/users')
+}
+
+export async function adminToggleAdmin_action(targetUserId: string, isAdmin: boolean) {
+  await requireAdmin()
+
+  await prisma.user.update({ where: { id: targetUserId }, data: { isAdmin } })
+  revalidatePath('/admin/users')
+}
+
+// ---------- Data ----------
+
 export async function exportClients_action() {
-  const { supabase, user } = await getUser()
+  const { userId } = await getUser()
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('plan')
-    .eq('id', user.id)
-    .single()
-
-  if (profile?.plan !== 'pro') {
-    return { error: 'Export is a Pro feature.' }
-  }
-
-  const { data: clients } = await supabase
-    .from('clients')
-    .select('name, email, phone, company, status, notes, created_at, last_contact_at')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false })
-
-  if (!clients) return { error: 'No data.' }
+  const clients = await prisma.client.findMany({
+    where: { userId },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      name: true, email: true, phone: true, company: true,
+      status: true, notes: true, createdAt: true, lastContactAt: true,
+    },
+  })
 
   const header = 'Name,Email,Phone,Company,Status,Notes,Created,Last Contact'
   const rows = clients.map(c =>
-    [c.name, c.email, c.phone, c.company, c.status, c.notes, c.created_at, c.last_contact_at]
+    [c.name, c.email, c.phone, c.company, c.status, c.notes,
+      c.createdAt?.toISOString(), c.lastContactAt?.toISOString()]
       .map(v => `"${(v ?? '').toString().replace(/"/g, '""')}"`)
       .join(',')
   )
@@ -192,10 +260,8 @@ export async function exportClients_action() {
 }
 
 export async function deleteAccount_action() {
-  const { supabase, user } = await getUser()
+  const { userId } = await getUser()
 
-  const adminClient = createClient()
-  await adminClient.from('clients').delete().eq('user_id', user.id)
-  await supabase.auth.signOut()
+  await prisma.user.delete({ where: { id: userId } })
   redirect('/')
 }

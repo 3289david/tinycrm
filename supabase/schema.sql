@@ -1,11 +1,11 @@
 -- Run this in your Supabase SQL editor.
 
--- Profiles (created automatically when a user signs up)
+-- Profiles (auto-created on signup)
 create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  plan text not null default 'free',
-  stripe_customer_id text unique,
-  stripe_subscription_id text,
+  display_name text,
+  company_name text,
+  stripe_account_id text,
   created_at timestamptz default now()
 );
 
@@ -76,7 +76,37 @@ create policy "users crud own timeline events" on timeline_events
 
 create index if not exists timeline_events_client_idx on timeline_events(client_id);
 
--- Auto-update updated_at
+-- Invoices (sent to clients for payment)
+create table if not exists invoices (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  client_id uuid not null references clients(id) on delete cascade,
+  amount_cents integer not null check (amount_cents > 0),
+  currency text not null default 'usd',
+  description text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'paid', 'cancelled', 'refunded')),
+  stripe_session_id text,
+  stripe_payment_intent_id text,
+  due_date date,
+  paid_at timestamptz,
+  created_at timestamptz default now()
+);
+
+alter table invoices enable row level security;
+
+create policy "users crud own invoices" on invoices
+  for all using (auth.uid() = user_id);
+
+-- Allow public read on invoices by id (for payment page, anon access)
+create policy "public read invoice by id" on invoices
+  for select using (true);
+
+create index if not exists invoices_user_id_idx on invoices(user_id);
+create index if not exists invoices_client_id_idx on invoices(client_id);
+create index if not exists invoices_status_idx on invoices(status);
+
+-- Auto-update updated_at on clients
 create or replace function update_updated_at()
 returns trigger as $$
 begin

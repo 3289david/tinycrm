@@ -1,28 +1,21 @@
-import { createClient } from '@/lib/supabase/server'
+import { getServerSession } from 'next-auth/next'
+import { authOptions } from '@/lib/auth'
+import { prisma } from '@/lib/prisma'
 import { redirect } from 'next/navigation'
 import ExportButton from './ExportButton'
-import UpgradeButton from './UpgradeButton'
 import DeleteAccountButton from './DeleteAccountButton'
+import ProfileForm from './ProfileForm'
+import PasswordForm from './PasswordForm'
 
 export default async function SettingsPage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) redirect('/login')
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('plan')
-    .eq('id', user.id)
-    .single()
-
-  const { count: clientCount } = await supabase
-    .from('clients')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .neq('status', 'archived')
-
-  const plan = profile?.plan ?? 'free'
-  const isPro = plan === 'pro'
+  const [user, clientCount, invoiceCount] = await Promise.all([
+    prisma.user.findUnique({ where: { id: session.user.id }, select: { email: true, name: true, company: true } }),
+    prisma.client.count({ where: { userId: session.user.id, status: { not: 'archived' } } }),
+    prisma.invoice.count({ where: { userId: session.user.id, status: 'pending' } }),
+  ])
 
   return (
     <div className="max-w-xl mx-auto px-8 py-10">
@@ -31,43 +24,40 @@ export default async function SettingsPage() {
       </h1>
 
       <div className="space-y-8">
-        {/* Account */}
+        {/* Stats */}
         <section>
           <p className="text-xs text-ink-mute mb-4 uppercase font-normal" style={{ fontSize: 10, letterSpacing: '0.1px' }}>Account</p>
           <div className="space-y-2">
-            <div className="flex justify-between items-center py-2">
-              <span className="text-sm text-ink-mute">Email</span>
-              <span className="text-sm text-ink">{user.email}</span>
-            </div>
-            <div className="flex justify-between items-center py-2">
-              <span className="text-sm text-ink-mute">Plan</span>
-              <span className="text-sm text-ink font-normal capitalize">{plan}</span>
-            </div>
-            <div className="flex justify-between items-center py-2">
-              <span className="text-sm text-ink-mute">Active clients</span>
-              <span className="text-sm text-ink tnum">
-                {clientCount ?? 0}{!isPro && ' / 100'}
-              </span>
-            </div>
+            {[
+              { label: 'Email', value: user?.email },
+              { label: 'Active clients', value: String(clientCount) },
+              { label: 'Pending invoices', value: String(invoiceCount) },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex justify-between items-center py-2 border-b border-hairline last:border-0">
+                <span className="text-sm text-ink-mute">{label}</span>
+                <span className="text-sm text-ink tnum">{value}</span>
+              </div>
+            ))}
           </div>
         </section>
 
         <div className="border-t border-hairline" />
 
-        {/* Pro */}
-        {!isPro && (
-          <>
-            <section>
-              <p className="text-xs text-ink-mute mb-4 uppercase font-normal" style={{ fontSize: 10, letterSpacing: '0.1px' }}>Upgrade</p>
-              <div className="p-6 rounded-lg border border-hairline bg-canvas-soft">
-                <p className="text-ink text-sm font-normal mb-1">Pro — $4/month</p>
-                <p className="text-ink-mute text-sm mb-4">Unlimited clients, CSV export, and backup.</p>
-                <UpgradeButton />
-              </div>
-            </section>
-            <div className="border-t border-hairline" />
-          </>
-        )}
+        {/* Profile */}
+        <section>
+          <p className="text-xs text-ink-mute mb-4 uppercase font-normal" style={{ fontSize: 10, letterSpacing: '0.1px' }}>Profile</p>
+          <ProfileForm name={user?.name ?? ''} company={user?.company ?? ''} />
+        </section>
+
+        <div className="border-t border-hairline" />
+
+        {/* Password */}
+        <section>
+          <p className="text-xs text-ink-mute mb-4 uppercase font-normal" style={{ fontSize: 10, letterSpacing: '0.1px' }}>Password</p>
+          <PasswordForm />
+        </section>
+
+        <div className="border-t border-hairline" />
 
         {/* Export */}
         <section>
@@ -75,9 +65,9 @@ export default async function SettingsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-ink">Export clients</p>
-              <p className="text-xs text-ink-mute mt-0.5">Download all your client data as CSV.</p>
+              <p className="text-xs text-ink-mute mt-0.5">Download all client data as CSV.</p>
             </div>
-            <ExportButton isPro={isPro} />
+            <ExportButton />
           </div>
         </section>
 
@@ -89,7 +79,7 @@ export default async function SettingsPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-ink">Delete account</p>
-              <p className="text-xs text-ink-mute mt-0.5">Permanently remove all your data.</p>
+              <p className="text-xs text-ink-mute mt-0.5">Permanently remove your account and all data.</p>
             </div>
             <DeleteAccountButton />
           </div>

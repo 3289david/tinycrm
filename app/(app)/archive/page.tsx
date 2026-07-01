@@ -1,18 +1,17 @@
-import { createClient } from '@/lib/supabase/server'
+import { getServerSession } from 'next-auth/next'
+import { authOptions } from '@/lib/auth'
+import { prisma } from '@/lib/prisma'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 
 export default async function ArchivePage() {
-  const supabase = createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect('/login')
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) redirect('/login')
 
-  const { data: clients } = await supabase
-    .from('clients')
-    .select('id, name, company, created_at')
-    .eq('user_id', user.id)
-    .eq('status', 'archived')
-    .order('created_at', { ascending: false })
+  const clients = await prisma.client.findMany({
+    where: { userId: session.user.id, status: 'archived' },
+    orderBy: { updatedAt: 'desc' },
+  })
 
   return (
     <div className="max-w-2xl mx-auto px-8 py-10">
@@ -20,7 +19,7 @@ export default async function ArchivePage() {
         Archive
       </h1>
 
-      {!clients || clients.length === 0 ? (
+      {clients.length === 0 ? (
         <p className="text-ink-mute text-sm">No archived clients.</p>
       ) : (
         <div className="divide-y divide-hairline">
@@ -35,7 +34,7 @@ export default async function ArchivePage() {
                 {c.company && <p className="text-ink-mute text-xs mt-0.5">{c.company}</p>}
               </div>
               <span className="text-ink-mute text-xs tnum">
-                {new Date(c.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                {new Date(c.updatedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
               </span>
             </Link>
           ))}

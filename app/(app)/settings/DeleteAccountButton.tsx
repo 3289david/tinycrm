@@ -1,7 +1,7 @@
 'use client'
 
-import { deleteAccount_action } from '@/lib/actions'
 import { useState } from 'react'
+import { deleteAccount_action } from '@/lib/actions'
 
 export default function DeleteAccountButton() {
   const [confirming, setConfirming] = useState(false)
@@ -9,17 +9,14 @@ export default function DeleteAccountButton() {
   if (confirming) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-xs text-ruby">Are you sure?</span>
+        <span className="text-xs text-ruby">This cannot be undone.</span>
         <button
           onClick={() => deleteAccount_action()}
           className="text-xs font-normal text-white bg-ruby px-3 py-1.5 rounded-pill hover:opacity-80 transition-opacity"
         >
           Delete
         </button>
-        <button
-          onClick={() => setConfirming(false)}
-          className="text-xs text-ink-mute hover:text-ink transition-colors"
-        >
+        <button onClick={() => setConfirming(false)} className="text-xs text-ink-mute hover:text-ink transition-colors">
           Cancel
         </button>
       </div>

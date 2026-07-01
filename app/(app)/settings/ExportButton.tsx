@@ -3,20 +3,14 @@
 import { useState } from 'react'
 import { exportClients_action } from '@/lib/actions'
 
-export default function ExportButton({ isPro }: { isPro: boolean }) {
+export default function ExportButton() {
   const [loading, setLoading] = useState(false)
 
   async function handleExport() {
-    if (!isPro) {
-      alert('Export is a Pro feature. Upgrade to download your data.')
-      return
-    }
     setLoading(true)
     const result = await exportClients_action()
     setLoading(false)
-    if (result.error) { alert(result.error); return }
     if (!result.csv) return
-
     const blob = new Blob([result.csv], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -30,11 +24,7 @@ export default function ExportButton({ isPro }: { isPro: boolean }) {
     <button
       onClick={handleExport}
       disabled={loading}
-      className={`text-sm font-normal px-4 py-2 rounded-pill border transition-colors disabled:opacity-50 ${
-        isPro
-          ? 'border-primary text-primary hover:bg-primary hover:text-white'
-          : 'border-hairline text-ink-mute'
-      }`}
+      className="border border-primary text-primary font-normal text-sm px-4 py-2 rounded-pill hover:bg-primary hover:text-white transition-colors disabled:opacity-50"
     >
       {loading ? 'Exporting...' : 'Export CSV'}
     </button>

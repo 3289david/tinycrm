@@ -6,10 +6,10 @@ import { useRef } from 'react'
 interface Event {
   id: string
   content: string
-  created_at: string
+  createdAt: Date
 }
 
-function formatDate(dateStr: string) {
+function formatDate(dateStr: Date) {
   const d = new Date(dateStr)
   const now = new Date()
   const diff = Math.floor((now.getTime() - d.getTime()) / 86400000)
@@ -62,7 +62,7 @@ export default function TimelineSection({ clientId, events }: { clientId: string
               </div>
               <div className="pb-4 min-w-0">
                 <p className="text-ink text-sm">{e.content}</p>
-                <p className="text-ink-mute text-xs mt-0.5 tnum">{formatDate(e.created_at)}</p>
+                <p className="text-ink-mute text-xs mt-0.5 tnum">{formatDate(e.createdAt)}</p>
               </div>
             </div>
           ))}
