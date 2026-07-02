@@ -29,9 +29,8 @@ jobs:
       - name: Install deps
         run: cd website && npm ci
 
-      - name: Sync page content from app/
+      - name: Sync docs content from app/docs/
         run: |
-          cp app/page.tsx website/app/page.tsx
           cp app/docs/components.tsx website/app/docs/components.tsx
           cp app/docs/DocsNav.tsx    website/app/docs/DocsNav.tsx
           cp app/docs/layout.tsx     website/app/docs/layout.tsx
