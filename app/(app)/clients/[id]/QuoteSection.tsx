@@ -1,18 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { createInvoice_action, cancelInvoice_action } from '@/lib/actions'
+import { createQuote_action, updateQuoteStatus_action, convertQuoteToInvoice_action } from '@/lib/actions'
 import clsx from 'clsx'
 
-interface Invoice {
+interface Quote {
   id: string
-  invoiceNumber: string | null
+  quoteNumber: string | null
   amountCents: number
   currency: string
   description: string
   status: string
-  dueDate: Date | null
-  paidAt: Date | null
+  validUntil: Date | null
   createdAt: Date
 }
 
@@ -23,8 +22,16 @@ interface Service {
   priceCents: number
 }
 
-function fmt(cents: number, currency: string) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(cents / 100)
+const STATUS_STYLE: Record<string, string> = {
+  draft: 'text-ink-mute bg-canvas-soft border-hairline',
+  sent: 'text-primary-deep bg-primary-subdued border-transparent',
+  accepted: 'text-ink bg-canvas-soft border-hairline',
+  declined: 'text-ruby bg-canvas border-ruby',
+  expired: 'text-ink-mute bg-canvas border-hairline',
+}
+
+function fmt(cents: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(cents / 100)
 }
 
 function formatDate(d: Date | null) {
@@ -32,31 +39,18 @@ function formatDate(d: Date | null) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
-function isOverdue(inv: Invoice) {
-  return inv.status === 'pending' && inv.dueDate && new Date(inv.dueDate) < new Date()
-}
-
-const STATUS_STYLE: Record<string, string> = {
-  pending: 'text-ink-mute bg-canvas-soft border-hairline',
-  paid: 'text-primary-deep bg-primary-subdued border-transparent',
-  cancelled: 'text-ink-mute bg-canvas border-hairline',
-  refunded: 'text-ruby bg-canvas border-ruby',
-  overdue: 'text-ruby bg-canvas border-ruby',
-}
-
-export default function InvoiceSection({
+export default function QuoteSection({
   clientId,
-  invoices,
+  quotes,
   services,
 }: {
   clientId: string
-  invoices: Invoice[]
+  quotes: Quote[]
   services: Service[]
 }) {
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
-  const [copied, setCopied] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
 
@@ -69,8 +63,7 @@ export default function InvoiceSection({
     e.preventDefault()
     setLoading(true)
     setError('')
-    const fd = new FormData(e.currentTarget)
-    const result = await createInvoice_action(clientId, fd)
+    const result = await createQuote_action(clientId, new FormData(e.currentTarget))
     setLoading(false)
     if (result?.error) { setError(result.error); return }
     setShowForm(false)
@@ -78,24 +71,29 @@ export default function InvoiceSection({
     setDescription('')
   }
 
-  function copyLink(invoiceId: string) {
-    const url = `${window.location.origin}/pay/${invoiceId}`
-    navigator.clipboard.writeText(url)
-    setCopied(invoiceId)
-    setTimeout(() => setCopied(null), 2000)
+  async function markSent(id: string) {
+    await updateQuoteStatus_action(id, clientId, 'sent')
+  }
+  async function markDeclined(id: string) {
+    await updateQuoteStatus_action(id, clientId, 'declined')
+  }
+  async function handleConvert(id: string) {
+    if (!confirm('Convert this quote to an invoice?')) return
+    const result = await convertQuoteToInvoice_action(id, clientId)
+    if (result?.error) alert(result.error)
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-xs text-ink-mute uppercase font-normal" style={{ fontSize: 10, letterSpacing: '0.1px' }}>
-          Invoices
+          Quotes
         </p>
         <button
           onClick={() => setShowForm(v => !v)}
           className="text-xs font-normal text-primary hover:underline"
         >
-          {showForm ? 'Cancel' : 'New invoice'}
+          {showForm ? 'Cancel' : 'New quote'}
         </button>
       </div>
 
@@ -112,7 +110,7 @@ export default function InvoiceSection({
                     onClick={() => applyService(svc)}
                     className="text-xs font-normal px-3 py-1.5 border border-hairline rounded-pill bg-canvas hover:bg-primary hover:text-white hover:border-primary transition-colors"
                   >
-                    {svc.name} · {fmt(svc.priceCents, 'usd')}
+                    {svc.name} · {fmt(svc.priceCents)}
                   </button>
                 ))}
               </div>
@@ -126,21 +124,19 @@ export default function InvoiceSection({
                 type="number"
                 step="0.01"
                 min="0.01"
-                placeholder="100.00"
                 required
+                placeholder="500.00"
                 value={amount}
                 onChange={e => setAmount(e.target.value)}
-                className="w-full px-3 py-2 border border-hairline-input text-ink text-sm bg-canvas outline-none focus:border-primary transition-colors"
-                style={{ borderRadius: 6 }}
+                className="w-full px-3 py-2 border border-hairline-input text-ink text-sm bg-canvas outline-none focus:border-primary transition-colors rounded-md"
               />
             </div>
             <div>
-              <label className="block text-xs text-ink-mute mb-1 font-normal">Due date</label>
+              <label className="block text-xs text-ink-mute mb-1 font-normal">Valid until</label>
               <input
-                name="due_date"
+                name="valid_until"
                 type="date"
-                className="w-full px-3 py-2 border border-hairline-input text-ink text-sm bg-canvas outline-none focus:border-primary transition-colors"
-                style={{ borderRadius: 6 }}
+                className="w-full px-3 py-2 border border-hairline-input text-ink text-sm bg-canvas outline-none focus:border-primary transition-colors rounded-md"
               />
             </div>
           </div>
@@ -149,81 +145,83 @@ export default function InvoiceSection({
             <input
               name="description"
               type="text"
-              placeholder="Web design — June 2025"
               required
+              placeholder="Website redesign"
               value={description}
               onChange={e => setDescription(e.target.value)}
-              className="w-full px-3 py-2 border border-hairline-input text-ink text-sm bg-canvas outline-none focus:border-primary transition-colors"
-              style={{ borderRadius: 6 }}
+              className="w-full px-3 py-2 border border-hairline-input text-ink text-sm bg-canvas outline-none focus:border-primary transition-colors rounded-md"
             />
           </div>
-          <input type="hidden" name="currency" value="usd" />
+          <div>
+            <label className="block text-xs text-ink-mute mb-1 font-normal">Notes</label>
+            <textarea
+              name="notes"
+              rows={2}
+              placeholder="Any additional notes for the client..."
+              className="w-full px-3 py-2 border border-hairline-input text-ink text-sm bg-canvas outline-none focus:border-primary transition-colors rounded-md resize-none"
+            />
+          </div>
           {error && <p className="text-ruby text-sm">{error}</p>}
           <button
             type="submit"
             disabled={loading}
             className="bg-primary text-white font-normal text-sm px-4 py-2 rounded-pill hover:bg-primary-deep transition-colors disabled:opacity-50"
           >
-            {loading ? 'Creating...' : 'Create invoice'}
+            {loading ? 'Creating...' : 'Create quote'}
           </button>
         </form>
       )}
 
-      {invoices.length === 0 && !showForm && (
-        <p className="text-ink-mute text-sm">No invoices yet.</p>
+      {quotes.length === 0 && !showForm && (
+        <p className="text-ink-mute text-sm">No quotes yet.</p>
       )}
 
-      {invoices.length > 0 && (
+      {quotes.length > 0 && (
         <div className="space-y-2">
-          {invoices.map(inv => {
-            const overdue = isOverdue(inv)
-            const displayStatus = overdue ? 'overdue' : inv.status
-            return (
-              <div key={inv.id} className="flex items-center justify-between py-3 border-b border-hairline last:border-0">
+          {quotes.map(q => (
+            <div key={q.id} className="py-3 border-b border-hairline last:border-0">
+              <div className="flex items-center justify-between">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-0.5">
-                    {inv.invoiceNumber && (
-                      <span className="text-xs text-ink-mute tnum">{inv.invoiceNumber}</span>
+                    {q.quoteNumber && (
+                      <span className="text-xs text-ink-mute tnum">{q.quoteNumber}</span>
                     )}
-                    <span className="text-sm text-ink font-normal tnum">
-                      {fmt(inv.amountCents, inv.currency)}
-                    </span>
-                    <span className={clsx('text-xs border px-2 py-0.5 rounded-pill', STATUS_STYLE[displayStatus])}
-                      style={{ fontSize: 10 }}>
-                      {displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1)}
+                    <span className="text-sm text-ink font-normal tnum">{fmt(q.amountCents)}</span>
+                    <span
+                      className={clsx('text-xs border px-2 py-0.5 rounded-pill', STATUS_STYLE[q.status])}
+                      style={{ fontSize: 10 }}
+                    >
+                      {q.status.charAt(0).toUpperCase() + q.status.slice(1)}
                     </span>
                   </div>
-                  <p className="text-xs text-ink-mute truncate">{inv.description}</p>
-                  {inv.dueDate && (
-                    <p className={clsx('text-xs tnum', overdue ? 'text-ruby' : 'text-ink-mute')}>
-                      Due {formatDate(inv.dueDate)}
-                    </p>
-                  )}
-                  {inv.paidAt && (
-                    <p className="text-xs text-ink-mute tnum">Paid {formatDate(inv.paidAt)}</p>
+                  <p className="text-xs text-ink-mute truncate">{q.description}</p>
+                  {q.validUntil && (
+                    <p className="text-xs text-ink-mute tnum">Valid until {formatDate(q.validUntil)}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 ml-4 shrink-0">
-                  {inv.status === 'pending' && (
+                  {q.status === 'draft' && (
+                    <button onClick={() => markSent(q.id)} className="text-xs text-ink-mute hover:text-ink transition-colors">
+                      Mark sent
+                    </button>
+                  )}
+                  {(q.status === 'draft' || q.status === 'sent') && (
                     <>
                       <button
-                        onClick={() => copyLink(inv.id)}
+                        onClick={() => handleConvert(q.id)}
                         className="text-xs font-normal text-primary hover:underline"
                       >
-                        {copied === inv.id ? 'Copied' : 'Copy link'}
+                        Convert to invoice
                       </button>
-                      <button
-                        onClick={() => cancelInvoice_action(inv.id, clientId)}
-                        className="text-xs text-ink-mute hover:text-ruby transition-colors"
-                      >
-                        Cancel
+                      <button onClick={() => markDeclined(q.id)} className="text-xs text-ink-mute hover:text-ruby transition-colors">
+                        Decline
                       </button>
                     </>
                   )}
                 </div>
               </div>
-            )
-          })}
+            </div>
+          ))}
         </div>
       )}
     </div>

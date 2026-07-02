@@ -189,10 +189,19 @@ export async function createInvoice_action(clientId: string, formData: FormData)
   const amount = parseFloat(amountStr)
   if (isNaN(amount) || amount <= 0) return { error: 'Amount must be greater than 0.' }
 
+  const last = await prisma.invoice.findFirst({
+    where: { userId, invoiceNumber: { not: null } },
+    orderBy: { createdAt: 'desc' },
+    select: { invoiceNumber: true },
+  })
+  const seq = last?.invoiceNumber ? parseInt(last.invoiceNumber.replace('INV-', '')) + 1 : 1
+  const invoiceNumber = `INV-${String(seq).padStart(4, '0')}`
+
   await prisma.invoice.create({
     data: {
       userId,
       clientId,
+      invoiceNumber,
       amountCents: Math.round(amount * 100),
       currency,
       description,
@@ -216,6 +225,150 @@ export async function cancelInvoice_action(invoiceId: string, clientId: string) 
 
   revalidatePath(`/app/clients/${clientId}`)
   revalidatePath('/app/invoices')
+}
+
+// ---------- Quotes ----------
+
+export async function createQuote_action(clientId: string, formData: FormData) {
+  const { userId } = await getUser()
+
+  const description = ((formData.get('description') as string) ?? '').trim()
+  const amountStr = ((formData.get('amount') as string) ?? '').trim()
+  const notes = ((formData.get('notes') as string) ?? '').trim()
+  const validUntilStr = formData.get('valid_until') as string
+
+  if (!description) return { error: 'Description is required.' }
+  const amount = parseFloat(amountStr)
+  if (isNaN(amount) || amount <= 0) return { error: 'Amount must be greater than 0.' }
+
+  const last = await prisma.quote.findFirst({
+    where: { userId, quoteNumber: { not: null } },
+    orderBy: { createdAt: 'desc' },
+    select: { quoteNumber: true },
+  })
+  const seq = last?.quoteNumber ? parseInt(last.quoteNumber.replace('QT-', '')) + 1 : 1
+  const quoteNumber = `QT-${String(seq).padStart(4, '0')}`
+
+  await prisma.quote.create({
+    data: {
+      userId,
+      clientId,
+      quoteNumber,
+      amountCents: Math.round(amount * 100),
+      currency: 'usd',
+      description,
+      notes: notes || null,
+      validUntil: validUntilStr ? new Date(validUntilStr) : null,
+      status: 'draft',
+    },
+  })
+
+  revalidatePath(`/app/clients/${clientId}`)
+  revalidatePath('/app/quotes')
+  return { error: null }
+}
+
+export async function updateQuoteStatus_action(quoteId: string, clientId: string, status: string) {
+  const { userId } = await getUser()
+
+  await prisma.quote.updateMany({
+    where: { id: quoteId, userId },
+    data: { status, updatedAt: new Date() },
+  })
+
+  revalidatePath(`/app/clients/${clientId}`)
+  revalidatePath('/app/quotes')
+}
+
+export async function convertQuoteToInvoice_action(quoteId: string, clientId: string) {
+  const { userId } = await getUser()
+
+  const quote = await prisma.quote.findFirst({ where: { id: quoteId, userId } })
+  if (!quote) return { error: 'Quote not found.' }
+
+  const last = await prisma.invoice.findFirst({
+    where: { userId, invoiceNumber: { not: null } },
+    orderBy: { createdAt: 'desc' },
+    select: { invoiceNumber: true },
+  })
+  const seq = last?.invoiceNumber ? parseInt(last.invoiceNumber.replace('INV-', '')) + 1 : 1
+  const invoiceNumber = `INV-${String(seq).padStart(4, '0')}`
+
+  await prisma.invoice.create({
+    data: {
+      userId,
+      clientId: quote.clientId,
+      invoiceNumber,
+      amountCents: quote.amountCents,
+      currency: quote.currency,
+      description: quote.description,
+      status: 'pending',
+    },
+  })
+
+  await prisma.quote.updateMany({
+    where: { id: quoteId, userId },
+    data: { status: 'accepted', updatedAt: new Date() },
+  })
+
+  revalidatePath(`/app/clients/${clientId}`)
+  revalidatePath('/app/quotes')
+  revalidatePath('/app/invoices')
+  return { error: null }
+}
+
+// ---------- Services ----------
+
+export async function createService_action(formData: FormData) {
+  const { userId } = await getUser()
+
+  const name = ((formData.get('name') as string) ?? '').trim()
+  const description = ((formData.get('description') as string) ?? '').trim()
+  const priceStr = ((formData.get('price') as string) ?? '').trim()
+
+  if (!name) return { error: 'Name is required.' }
+  const price = parseFloat(priceStr)
+  if (isNaN(price) || price < 0) return { error: 'Price must be a valid number.' }
+
+  await prisma.service.create({
+    data: {
+      userId,
+      name,
+      description: description || null,
+      priceCents: Math.round(price * 100),
+      currency: 'usd',
+    },
+  })
+
+  revalidatePath('/app/services')
+  return { error: null }
+}
+
+export async function updateService_action(serviceId: string, formData: FormData) {
+  const { userId } = await getUser()
+
+  const name = ((formData.get('name') as string) ?? '').trim()
+  const description = ((formData.get('description') as string) ?? '').trim()
+  const priceStr = ((formData.get('price') as string) ?? '').trim()
+
+  if (!name) return { error: 'Name is required.' }
+  const price = parseFloat(priceStr)
+  if (isNaN(price) || price < 0) return { error: 'Invalid price.' }
+
+  await prisma.service.updateMany({
+    where: { id: serviceId, userId },
+    data: { name, description: description || null, priceCents: Math.round(price * 100) },
+  })
+
+  revalidatePath('/app/services')
+  return { error: null }
+}
+
+export async function deleteService_action(serviceId: string) {
+  const { userId } = await getUser()
+
+  await prisma.service.deleteMany({ where: { id: serviceId, userId } })
+  revalidatePath('/app/services')
 }
 
 // ---------- Admin ----------

@@ -19,6 +19,8 @@ model User {
 
   clients  Client[]
   invoices Invoice[]
+  quotes   Quote[]
+  services Service[]
 }
 
 model Client {
@@ -38,6 +40,7 @@ model Client {
   tags     ClientTag[]
   timeline TimelineEvent[]
   invoices Invoice[]
+  quotes   Quote[]
 
   @@index([userId])
   @@index([status])
@@ -70,6 +73,7 @@ model Invoice {
   id                    String    @id @default(cuid())
   userId                String
   clientId              String
+  invoiceNumber         String?
   amountCents           Int
   currency              String    @default("usd")
   description           String
@@ -86,4 +90,40 @@ model Invoice {
   @@index([userId])
   @@index([clientId])
   @@index([status])
+}
+
+model Quote {
+  id          String    @id @default(cuid())
+  userId      String
+  clientId    String
+  quoteNumber String?
+  amountCents Int
+  currency    String    @default("usd")
+  description String
+  notes       String?
+  status      String    @default("draft")
+  validUntil  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([clientId])
+  @@index([status])
+}
+
+model Service {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  description String?
+  priceCents  Int
+  currency    String   @default("usd")
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
